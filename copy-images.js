@@ -4,11 +4,17 @@ const path = require('path');
 const srcDir = 'C:\\Users\\ADAN\\.gemini\\antigravity\\brain\\85930ca2-8859-450b-baac-0136578da9c5';
 const destDir = 'f:\\newolx\\public\\images';
 
+if (!fs.existsSync(srcDir)) {
+  console.log('Source directory not found. Skipping image copy (images are already committed to repository).');
+  process.exit(0);
+}
+
+const files = fs.readdirSync(srcDir);
+
 if (!fs.existsSync(destDir)) {
   fs.mkdirSync(destDir, { recursive: true });
 }
 
-const files = fs.readdirSync(srcDir);
 const targets = [
   { prefix: 'hero_macbook', dest: 'hero_macbook.png' },
   { prefix: 'category_smartphone', dest: 'category_smartphone.png' },
