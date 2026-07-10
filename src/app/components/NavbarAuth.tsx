@@ -5,6 +5,7 @@ import { X, Terminal, Smartphone, Shield, User, Mail, Lock, Eye, EyeOff, HelpCir
 import { createClient } from '@/lib/supabase/client';
 import { profileService } from '@/lib/supabase/services/profileService';
 import { signUpAction, loginAction, verifyOtpAction } from '@/app/auth/actions';
+import { encryptField } from '@/lib/crypto/clientEncrypt';
 
 type ModalMode = 'login' | 'signup' | 'verify' | 'profile' | 'photo' | 'success';
 
@@ -44,6 +45,7 @@ export default function NavbarAuth() {
   const [resent, setResent]         = useState(false);
   const [bio, setBio]               = useState('');
   const [avatarUrl, setAvatarUrl]   = useState('');
+  const [emailSessionRef, setEmailSessionRef] = useState('');
   const supabase = createClient();
   const otpRefs                     = useRef<(HTMLInputElement | null)[]>([]);
   const fileInputRef                = useRef<HTMLInputElement>(null);
@@ -137,10 +139,23 @@ export default function NavbarAuth() {
     setLoading(true);
     setAuthError('');
     try {
-      const res = await loginAction({
-        email: loginEmail,
-        password: loginPassword,
+      // Step 1: Send encrypted credentials to prepare route — get back an opaque sessionRef
+      const [encEmail, encPassword] = await Promise.all([
+        encryptField(loginEmail),
+        encryptField(loginPassword),
+      ]);
+      const prepRes = await fetch('/api/auth/prepare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: encEmail, password: encPassword }),
       });
+      const { sessionRef, error: prepErr } = await prepRes.json();
+      if (prepErr || !sessionRef) {
+        setAuthError(prepErr || 'Could not prepare session.');
+        return;
+      }
+      // Step 2: Call server action with ONLY the sessionRef — no credentials in this payload
+      const res = await loginAction({ sessionRef });
       if (!res.success) {
         setAuthError(res.error || 'Invalid credentials.');
       } else {
@@ -148,8 +163,7 @@ export default function NavbarAuth() {
         window.location.reload();
       }
     } catch (err: any) {
-      console.error("Login Exception:", err);
-      setAuthError(err?.message || (err && typeof err.toString === 'function' ? err.toString() : 'An unexpected error occurred during login.'));
+      setAuthError(err?.message || 'An unexpected error occurred during login.');
     } finally {
       setLoading(false);
     }
@@ -168,19 +182,33 @@ export default function NavbarAuth() {
     setLoading(true);
     setAuthError('');
     try {
-      const res = await signUpAction({
-        email,
-        password,
-        fullName,
+      // Step 1: Send encrypted credentials to prepare route — get back an opaque sessionRef
+      const [encEmail, encPassword, encFullName] = await Promise.all([
+        encryptField(email),
+        encryptField(password),
+        encryptField(fullName),
+      ]);
+      const prepRes = await fetch('/api/auth/prepare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: encEmail, password: encPassword, fullName: encFullName }),
       });
+      const { sessionRef, error: prepErr } = await prepRes.json();
+      if (prepErr || !sessionRef) {
+        setAuthError(prepErr || 'Could not prepare session.');
+        return;
+      }
+      // Store sessionRef to use later for OTP verification (email lookup)
+      setEmailSessionRef(sessionRef);
+      // Step 2: Call server action with ONLY the sessionRef — no credentials in this payload
+      const res = await signUpAction({ sessionRef });
       if (!res.success) {
         setAuthError(res.error || 'Could not create account.');
       } else {
         setMode('verify');
       }
     } catch (err: any) {
-      console.error("Signup Exception:", err);
-      setAuthError(err?.message || (err && typeof err.toString === 'function' ? err.toString() : 'An unexpected error occurred during signup.'));
+      setAuthError(err?.message || 'An unexpected error occurred during signup.');
     } finally {
       setLoading(false);
     }
@@ -190,24 +218,33 @@ export default function NavbarAuth() {
     if (e) e.preventDefault();
     const token = otp.join('');
     if (token.length !== OTP_LENGTH) {
-      setAuthError('Please enter the full 6-digit code.');
+      setAuthError('Please enter the full 8-digit code.');
       return;
     }
     setLoading(true);
     setAuthError('');
     try {
-      const res = await verifyOtpAction({
-        email,
-        token,
+      // Prepare a new sessionRef referencing the email (we need email for OTP verification)
+      const encEmail = await encryptField(email);
+      const prepRes = await fetch('/api/auth/prepare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: encEmail, password: encEmail }), // password field reused as placeholder
       });
+      const { sessionRef: emailRef, error: prepErr } = await prepRes.json();
+      if (prepErr || !emailRef) {
+        setAuthError(prepErr || 'Could not prepare session.');
+        return;
+      }
+      // Server action only receives an opaque ref + the OTP token (not secret)
+      const res = await verifyOtpAction({ emailRef, token });
       if (!res.success) {
         setAuthError(res.error || 'Invalid verification code.');
       } else {
         setMode('profile');
       }
     } catch (err: any) {
-      console.error("OTP Verification Exception:", err);
-      setAuthError(err?.message || (err && typeof err.toString === 'function' ? err.toString() : 'An unexpected error occurred during OTP verification.'));
+      setAuthError(err?.message || 'An unexpected error occurred during OTP verification.');
     } finally {
       setLoading(false);
     }
