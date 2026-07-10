@@ -1,7 +1,7 @@
 'use server';
 
 import { createServerSupabaseClient } from '@/lib/supabase/server';
-import { consumeCredentials } from '@/app/api/auth/prepare/route';
+import { decryptField } from '@/lib/crypto/serverDecrypt';
 
 interface AuthResponse {
   success: boolean;
@@ -10,19 +10,25 @@ interface AuthResponse {
 
 /**
  * Server Action for User Signup.
- * Only receives a sessionRef — no credentials in the payload.
+ * All sensitive fields arrive encrypted and are decrypted server-side
+ * before being forwarded to Supabase — never visible in the client payload.
  */
-export async function signUpAction(data: { sessionRef: string }): Promise<AuthResponse> {
+export async function signUpAction(data: {
+  email: string;
+  password: string;
+  fullName: string;
+}): Promise<AuthResponse> {
   const supabase = await createServerSupabaseClient();
 
   try {
-    const creds = consumeCredentials(data.sessionRef);
-    if (!creds) return { success: false, error: 'Session expired. Please try again.' };
+    const email    = decryptField(data.email);
+    const password = decryptField(data.password);
+    const fullName = decryptField(data.fullName);
 
     const { error } = await supabase.auth.signUp({
-      email:    creds.email,
-      password: creds.password,
-      options:  { data: { full_name: creds.fullName } },
+      email,
+      password,
+      options: { data: { full_name: fullName } },
     });
 
     if (error) return { success: false, error: error.message };
@@ -34,19 +40,18 @@ export async function signUpAction(data: { sessionRef: string }): Promise<AuthRe
 
 /**
  * Server Action for User Login.
- * Only receives a sessionRef — no credentials in the payload.
  */
-export async function loginAction(data: { sessionRef: string }): Promise<AuthResponse> {
+export async function loginAction(data: {
+  email: string;
+  password: string;
+}): Promise<AuthResponse> {
   const supabase = await createServerSupabaseClient();
 
   try {
-    const creds = consumeCredentials(data.sessionRef);
-    if (!creds) return { success: false, error: 'Session expired. Please try again.' };
+    const email    = decryptField(data.email);
+    const password = decryptField(data.password);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email:    creds.email,
-      password: creds.password,
-    });
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
 
     if (error) return { success: false, error: error.message };
     return { success: true };
@@ -57,19 +62,21 @@ export async function loginAction(data: { sessionRef: string }): Promise<AuthRes
 
 /**
  * Server Action for OTP Verification.
- * Only receives a sessionRef and plaintext token.
  */
-export async function verifyOtpAction(data: { emailRef: string; token: string }): Promise<AuthResponse> {
+export async function verifyOtpAction(data: {
+  email: string;
+  token: string;
+}): Promise<AuthResponse> {
   const supabase = await createServerSupabaseClient();
 
   try {
-    const creds = consumeCredentials(data.emailRef);
-    if (!creds) return { success: false, error: 'Session expired. Please try again.' };
+    const email = decryptField(data.email);
+    const token = decryptField(data.token);
 
     const { error } = await supabase.auth.verifyOtp({
-      email: creds.email,
-      token: data.token,
-      type:  'signup',
+      email,
+      token,
+      type: 'signup',
     });
 
     if (error) return { success: false, error: error.message };

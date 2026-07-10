@@ -45,7 +45,6 @@ export default function NavbarAuth() {
   const [resent, setResent]         = useState(false);
   const [bio, setBio]               = useState('');
   const [avatarUrl, setAvatarUrl]   = useState('');
-  const [emailSessionRef, setEmailSessionRef] = useState('');
   const supabase = createClient();
   const otpRefs                     = useRef<(HTMLInputElement | null)[]>([]);
   const fileInputRef                = useRef<HTMLInputElement>(null);
@@ -139,23 +138,15 @@ export default function NavbarAuth() {
     setLoading(true);
     setAuthError('');
     try {
-      // Step 1: Send encrypted credentials to prepare route — get back an opaque sessionRef
+      // Encrypt before transmission — plaintext never appears in the network payload
       const [encEmail, encPassword] = await Promise.all([
         encryptField(loginEmail),
         encryptField(loginPassword),
       ]);
-      const prepRes = await fetch('/api/auth/prepare', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: encEmail, password: encPassword }),
+      const res = await loginAction({
+        email: encEmail,
+        password: encPassword,
       });
-      const { sessionRef, error: prepErr } = await prepRes.json();
-      if (prepErr || !sessionRef) {
-        setAuthError(prepErr || 'Could not prepare session.');
-        return;
-      }
-      // Step 2: Call server action with ONLY the sessionRef — no credentials in this payload
-      const res = await loginAction({ sessionRef });
       if (!res.success) {
         setAuthError(res.error || 'Invalid credentials.');
       } else {
@@ -182,26 +173,17 @@ export default function NavbarAuth() {
     setLoading(true);
     setAuthError('');
     try {
-      // Step 1: Send encrypted credentials to prepare route — get back an opaque sessionRef
+      // Encrypt before transmission — plaintext never appears in the network payload
       const [encEmail, encPassword, encFullName] = await Promise.all([
         encryptField(email),
         encryptField(password),
         encryptField(fullName),
       ]);
-      const prepRes = await fetch('/api/auth/prepare', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: encEmail, password: encPassword, fullName: encFullName }),
+      const res = await signUpAction({
+        email: encEmail,
+        password: encPassword,
+        fullName: encFullName,
       });
-      const { sessionRef, error: prepErr } = await prepRes.json();
-      if (prepErr || !sessionRef) {
-        setAuthError(prepErr || 'Could not prepare session.');
-        return;
-      }
-      // Store sessionRef to use later for OTP verification (email lookup)
-      setEmailSessionRef(sessionRef);
-      // Step 2: Call server action with ONLY the sessionRef — no credentials in this payload
-      const res = await signUpAction({ sessionRef });
       if (!res.success) {
         setAuthError(res.error || 'Could not create account.');
       } else {
@@ -224,20 +206,15 @@ export default function NavbarAuth() {
     setLoading(true);
     setAuthError('');
     try {
-      // Prepare a new sessionRef referencing the email (we need email for OTP verification)
-      const encEmail = await encryptField(email);
-      const prepRes = await fetch('/api/auth/prepare', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: encEmail, password: encEmail }), // password field reused as placeholder
+      // Encrypt before transmission
+      const [encEmail, encToken] = await Promise.all([
+        encryptField(email),
+        encryptField(token),
+      ]);
+      const res = await verifyOtpAction({
+        email: encEmail,
+        token: encToken,
       });
-      const { sessionRef: emailRef, error: prepErr } = await prepRes.json();
-      if (prepErr || !emailRef) {
-        setAuthError(prepErr || 'Could not prepare session.');
-        return;
-      }
-      // Server action only receives an opaque ref + the OTP token (not secret)
-      const res = await verifyOtpAction({ emailRef, token });
       if (!res.success) {
         setAuthError(res.error || 'Invalid verification code.');
       } else {
